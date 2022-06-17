@@ -1,0 +1,14 @@
+kind: Service
+apiVersion: v1
+metadata:
+  name: lb-svc-1
+  namespace: default
+spec:
+  selector:
+    app: serviceLB-test
+  ports:
+    - name: port1
+      port: 81
+      targetPort: 81
+      protocol: TCP
+  type: LoadBalancer
