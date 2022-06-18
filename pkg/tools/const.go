@@ -1,6 +1,8 @@
 package tools
 
-import "time"
+import (
+	"time"
+)
 
 type ServiceTimerMode string
 

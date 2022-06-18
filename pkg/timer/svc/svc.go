@@ -18,13 +18,13 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	yamlserializer "k8s.io/apimachinery/pkg/runtime/serializer/yaml"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	yamlutil "k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
+	to "k8s.io/utils/pointer"
 )
 
 // ServiceTimer is the main struct for the service timer
@@ -39,10 +39,10 @@ type ServiceTimer struct {
 	DynamicClient       dynamic.Interface
 	Mode                tools.ServiceTimerMode
 
-	runningServices   sets.String
-	finishTimes       chan tools.ObjectFinishTime
-	svcNameToTimesMap map[string]*tools.ObjectFinishTime
-	signal            chan struct{}
+	processingServices map[string]*bool
+	finishTimes        chan tools.ObjectFinishTime
+	svcNameToTimesMap  map[string]*tools.ObjectFinishTime
+	signal             chan struct{}
 }
 
 // NewServiceTimer creates a new ServiceTimer
@@ -61,7 +61,7 @@ func NewServiceTimer(kubeClient kubernetes.Interface,
 		KubeClient:          kubeClient,
 		DynamicClient:       dynamicClient,
 		Mode:                mode,
-		runningServices:     sets.NewString(),
+		processingServices:  make(map[string]*bool),
 		finishTimes:         make(chan tools.ObjectFinishTime, count),
 		svcNameToTimesMap:   make(map[string]*tools.ObjectFinishTime),
 		signal:              make(chan struct{}),
@@ -167,7 +167,7 @@ func (st *ServiceTimer) handleCreate(ctx context.Context, isAsync bool) error {
 		if err != nil {
 			return err
 		}
-		st.runningServices.Insert(svc.Name)
+		st.processingServices[svc.Name] = to.BoolPtr(false)
 		log.Printf("Created service %s", svc.Name)
 
 		if !isAsync {
@@ -230,7 +230,7 @@ func (st *ServiceTimer) handleDelete(ctx context.Context, isDeleteAll bool) erro
 		deletionTimes = make([]tools.ObjectFinishTime, 0)
 
 		log.Printf("Deleting service %s", st.SvcName)
-		st.runningServices.Insert(st.SvcName)
+		st.processingServices[st.SvcName] = to.BoolPtr(false)
 		if err := st.KubeClient.CoreV1().Services(st.SvcNamespace).Delete(ctx, st.SvcName, metav1.DeleteOptions{}); err != nil {
 			return fmt.Errorf("error deleting service %s: %w", st.SvcName, err)
 		}
@@ -251,7 +251,7 @@ func (st *ServiceTimer) handleDelete(ctx context.Context, isDeleteAll bool) erro
 			deletionTimes = make([]tools.ObjectFinishTime, len(allLBSvc))
 
 			log.Printf("Deleting service %s", lbSvc)
-			st.runningServices.Insert(lbSvc)
+			st.processingServices[lbSvc] = to.BoolPtr(false)
 			if err := st.KubeClient.CoreV1().Services(st.SvcNamespace).Delete(ctx, lbSvc, metav1.DeleteOptions{}); err != nil {
 				return fmt.Errorf("error deleting service %s: %w", lbSvc, err)
 			}
@@ -350,7 +350,7 @@ func (st *ServiceTimer) setupAndRunEventsInformer(started, finished string) {
 	eventsInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			event, ok := obj.(*v1.Event)
-			if ok && st.runningServices.Has(event.InvolvedObject.Name) {
+			if ok && st.processingServices[event.InvolvedObject.Name] != nil && !*st.processingServices[event.InvolvedObject.Name] {
 				if strings.EqualFold(event.Reason, started) {
 					log.Printf("got started event: %+v", event)
 					if st.svcNameToTimesMap[event.InvolvedObject.Name] == nil {
@@ -363,6 +363,7 @@ func (st *ServiceTimer) setupAndRunEventsInformer(started, finished string) {
 					log.Printf("got finished event: %+v", event)
 					st.svcNameToTimesMap[event.InvolvedObject.Name].Finished = event.CreationTimestamp.Time
 					st.finishTimes <- *st.svcNameToTimesMap[event.InvolvedObject.Name]
+					st.processingServices[event.InvolvedObject.Name] = to.BoolPtr(true)
 					log.Printf("Finished in %s for service %s",
 						st.svcNameToTimesMap[event.InvolvedObject.Name].Finished.Sub(st.svcNameToTimesMap[event.InvolvedObject.Name].Started).String(),
 						event.InvolvedObject.Name)
