@@ -6,6 +6,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	debug bool
+)
+
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "kube-timer",
@@ -19,4 +23,8 @@ func Execute() {
 	if err != nil {
 		log.Fatalf("Error executing root command: %v", err)
 	}
+}
+
+func init() {
+	rootCmd.PersistentFlags().BoolVarP(&debug, "debug", "", false, "Enable debug logging")
 }

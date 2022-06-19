@@ -43,13 +43,16 @@ type ServiceTimer struct {
 	finishTimes        chan tools.ObjectFinishTime
 	svcNameToTimesMap  map[string]*tools.ObjectFinishTime
 	signal             chan struct{}
+
+	debug bool
 }
 
 // NewServiceTimer creates a new ServiceTimer
 func NewServiceTimer(kubeClient kubernetes.Interface,
 	dynamicClient dynamic.Interface,
 	definitionFile, svcName, svcNamespace, startedEventReason, finishedEventReason string,
-	count int, mode tools.ServiceTimerMode) *ServiceTimer {
+	count int, mode tools.ServiceTimerMode,
+	debug bool) *ServiceTimer {
 
 	return &ServiceTimer{
 		DefinitionFile:      definitionFile,
@@ -65,6 +68,7 @@ func NewServiceTimer(kubeClient kubernetes.Interface,
 		finishTimes:         make(chan tools.ObjectFinishTime, count),
 		svcNameToTimesMap:   make(map[string]*tools.ObjectFinishTime),
 		signal:              make(chan struct{}),
+		debug:               debug,
 	}
 }
 
@@ -186,11 +190,11 @@ func (st *ServiceTimer) handleCreate(ctx context.Context, isAsync bool) error {
 		<-st.signal
 	}
 
-	dumpServiceCreationResults(creationTimes)
+	st.dumpServiceCreationResults(creationTimes)
 	return nil
 }
 
-func dumpServiceCreationResults(creationTimes []tools.ObjectFinishTime) {
+func (st *ServiceTimer) dumpServiceCreationResults(creationTimes []tools.ObjectFinishTime) {
 	tools.Sort(creationTimes)
 	maxName, maxTime := tools.GetMaxTime(creationTimes)
 	minName, minTime := tools.GetMinTime(creationTimes)
@@ -204,9 +208,12 @@ func dumpServiceCreationResults(creationTimes []tools.ObjectFinishTime) {
 		avgTime,
 		medTime,
 		totTime)
+	if st.debug {
+		log.Printf("Creation times: %+v", creationTimes)
+	}
 }
 
-func dumpServiceDeletionResults(deletionTimes []tools.ObjectFinishTime) {
+func (st *ServiceTimer) dumpServiceDeletionResults(deletionTimes []tools.ObjectFinishTime) {
 	tools.Sort(deletionTimes)
 	maxName, maxTime := tools.GetMaxTime(deletionTimes)
 	minName, minTime := tools.GetMinTime(deletionTimes)
@@ -220,6 +227,9 @@ func dumpServiceDeletionResults(deletionTimes []tools.ObjectFinishTime) {
 		avgTime,
 		medTime,
 		totTime)
+	if st.debug {
+		log.Printf("Creation times: %+v", deletionTimes)
+	}
 }
 
 func (st *ServiceTimer) handleDelete(ctx context.Context, isDeleteAll bool) error {
@@ -267,7 +277,7 @@ func (st *ServiceTimer) handleDelete(ctx context.Context, isDeleteAll bool) erro
 		<-st.signal
 	}
 
-	dumpServiceDeletionResults(deletionTimes)
+	st.dumpServiceDeletionResults(deletionTimes)
 
 	return nil
 }
@@ -352,7 +362,9 @@ func (st *ServiceTimer) setupAndRunEventsInformer(started, finished string) {
 			event, ok := obj.(*v1.Event)
 			if ok && st.processingServices[event.InvolvedObject.Name] != nil && !*st.processingServices[event.InvolvedObject.Name] {
 				if strings.EqualFold(event.Reason, started) {
-					log.Printf("got started event: %+v", event)
+					if st.debug {
+						log.Printf("got started event: %+v", event)
+					}
 					if st.svcNameToTimesMap[event.InvolvedObject.Name] == nil {
 						st.svcNameToTimesMap[event.InvolvedObject.Name] = &tools.ObjectFinishTime{
 							Name:    event.InvolvedObject.Name,
@@ -360,7 +372,9 @@ func (st *ServiceTimer) setupAndRunEventsInformer(started, finished string) {
 						}
 					}
 				} else if strings.EqualFold(event.Reason, finished) {
-					log.Printf("got finished event: %+v", event)
+					if st.debug {
+						log.Printf("got finished event: %+v", event)
+					}
 					st.svcNameToTimesMap[event.InvolvedObject.Name].Finished = event.CreationTimestamp.Time
 					st.finishTimes <- *st.svcNameToTimesMap[event.InvolvedObject.Name]
 					st.processingServices[event.InvolvedObject.Name] = to.BoolPtr(true)

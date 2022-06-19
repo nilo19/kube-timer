@@ -57,7 +57,8 @@ var svcCmd = &cobra.Command{
 			startedEventReason,
 			finishedEventReason,
 			count,
-			mode)
+			mode,
+			debug)
 		if err := svcTimer.Validate(); err != nil {
 			log.Fatalf("Error validating service timer: %v", err)
 		}
