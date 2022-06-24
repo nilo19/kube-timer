@@ -1,0 +1,13 @@
+kind: Service
+apiVersion: v1
+metadata:
+  name: lb-svc-2
+spec:
+  selector:
+    app: serviceLB-test
+  ports:
+    - name: port1
+      port: 82
+      targetPort: 82
+      protocol: TCP
+  type: LoadBalancer
