@@ -308,10 +308,15 @@ func (st *ServiceTimer) createServiceFromFile(ctx context.Context) (*v1.Service,
 		Version:  "v1",
 		Resource: "services",
 	}
+	namespace := unstructuredObj.GetNamespace()
+	if strings.EqualFold(namespace, "") {
+		namespace = "default"
+	}
+
 	unstructuredService, err := st.DynamicClient.
 		//Resource(mapping.Resource).
 		Resource(gvr).
-		Namespace(unstructuredObj.GetNamespace()).
+		Namespace(namespace).
 		Create(ctx, unstructuredObj, metav1.CreateOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("error creating service: %w", err)
